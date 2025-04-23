@@ -368,8 +368,8 @@ class PandaSort:
         objects_in_air = torch.logical_and(
             charge_reward, torch.logical_not(objects_not_in_air)
         )
-        total_reward[objects_to_lift] -= target_pos_dist * 2.0
-        total_reward[objects_in_air] -= target_pos_dist * 0.5
+        total_reward[objects_to_lift] -= target_pos_dist[objects_to_lift] * 2.0
+        total_reward[objects_in_air] -= target_pos_dist[objects_to_lift] * 0.5
         total_reward[
             target_pos_dist < self.env_cfg["termination_if_distance_less_than"]
         ] += 10.0
