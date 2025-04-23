@@ -82,8 +82,7 @@ def get_cfgs():
             "finger_joint2",
         ],
         # termination
-        "termination_if_distance_less_than": 0.06,
-        "termination_if_angle_more_than": 70.0,
+        "termination_if_distance_less_than": 0.08,
         # base pose
         "episode_length_s": 10.0,
         "action_scale": 0.25,
@@ -92,7 +91,6 @@ def get_cfgs():
         "num_obs": 35,
         "num_envs": 4,
         "reward_scales": {
-            "dist_to_target_obj": 1.0,
             "dist_to_target_obj_pos": 1.0,
             "action_rate": -0.005,
         },

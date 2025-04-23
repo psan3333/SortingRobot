@@ -138,6 +138,9 @@ class PandaSort:
         self.grasps = torch.zeros(
             (self.num_envs, 5), device=self.device, dtype=gs.tc_float
         )
+        self.on_ground_discount = torch.zeros(
+            self.num_envs, device=self.device, dtype=gs.tc_float
+        )
 
         self.actions = torch.zeros(
             (self.num_envs, self.num_actions), device=self.device, dtype=gs.tc_float
@@ -152,16 +155,14 @@ class PandaSort:
 
         # agent target data
         self.object_pos = self.object.get_pos()
+        self.default_object_pos = self.object.get_pos()
         self.target_pos = torch.tensor(
             [0.5, 0.5, 0.5], device=self.device, dtype=gs.tc_float
         ).repeat(self.num_envs, 1)
-        self.angles = torch.zeros(
-            (self.num_envs), device=self.device, dtype=gs.tc_float
-        )
         self.batch_norm = torch.func.vmap(
             torch.linalg.norm
         )  # parallel distance computation
-        self.max_episode_length = math.ceil(10 / self.dt)  # 10 секунд по 50 кадров
+        self.max_episode_length = math.ceil(10 / self.dt)  # 1000
         self.step_counter = 0
         self.extras = dict()
 
@@ -248,7 +249,8 @@ class PandaSort:
             dim=-1,
         )
         self.object.set_pos(pos=new_object_pos, envs_idx=envs_idx)
-        self.object_pos[envs_idx] = new_object_pos
+        self.object_pos[envs_idx] = self.object.get_pos(envs_idx=envs_idx)
+        self.default_object_pos[envs_idx] = self.object.get_pos(envs_idx=envs_idx)
         new_targets = torch.cat(
             [
                 torch.rand((len(envs_idx), 1), device=self.device, dtype=gs.tc_float)
@@ -301,16 +303,7 @@ class PandaSort:
         self.dof_pos[:] = self.panda_arm.get_dofs_position(self.motor_dofs)
         self.dof_vel[:] = self.panda_arm.get_dofs_velocity(self.motor_dofs)
         self.gripper_pos[:] = self.panda_arm.get_joint(self.joint_names[-1]).get_pos()
-        # self.angles[:] = self._angle_between_target()
-        # check termination and reset
-        # TODO: define termination factors
-        self.reset_buf = self.episode_length_buf > self.max_episode_length
-        reached_the_target = (
-            self.batch_norm(self.object_pos - self.gripper_pos)
-            < self.env_cfg["termination_if_distance_less_than"]
-        )
-        self.reset_buf |= reached_the_target
-        # self.reset_buf |= self.angles > self.env_cfg["termination_if_angle_more_than"]
+        self.check_for_reset()
 
         time_out_idx = (
             (self.episode_length_buf > self.max_episode_length)
@@ -326,7 +319,6 @@ class PandaSort:
 
         # compute reward
         self.rew_buf[:] = 0.0
-        self.rew_buf[reached_the_target] += 10.0
         for name, reward_func in self.reward_functions.items():
             rew = reward_func() * self.reward_scales[name]
             self.rew_buf += rew
@@ -335,7 +327,6 @@ class PandaSort:
         self.obs_buf = torch.cat(
             [
                 self.object_pos - self.gripper_pos,  # 3
-                # self.angles / 90.0,
                 self.target_pos - self.object_pos,  # 3
                 self.object_pos,  # 3
                 self.target_pos,  # 3
@@ -345,48 +336,40 @@ class PandaSort:
             ],
             axis=-1,
         )
-        # print(self.angles[:10])
 
         self.last_actions[:] = self.actions[:]
-
         return self.obs_buf, None, self.rew_buf, self.reset_buf, self.extras
 
-    # def _angle_between_target(self):
-    #     base_joint: RigidJoint = self.panda_arm.get_joint(self.joint_names[0])
-    #     base_pos = base_joint.get_pos()
-    #     base_quat = base_joint.get_quat()
-    #     hand_angles = torch.abs(quat_to_xyz(base_quat)[..., 2])
-    #     vector_to_object = torch.cat(
-    #         [
-    #             self.object_pos[:2] - base_pos[:2],
-    #             torch.tensor([0.0], device=self.device, dtype=gs.tc_float).repeat(self.num_envs, 1),
-    #         ],
-    #         dim=-1,
-    #     )
-    #     batched_func = torch.func.vmap(lambda u, v: (torch.atan2(torch.cross(u, v), torch.dot(u, v))) * 180 / torch.pi)
-    #     target_angle = batched_func(vector_to_object, self.base_vector)
-    #     angles = target_angle - hand_angles
-    #     return angles.unsqueeze(-1)
+    def check_for_reset(self):
+        self.reset_buf = self.episode_length_buf > self.max_episode_length
+        reached_the_target = (
+            self.batch_norm(self.target_pos - self.object_pos)
+            < self.env_cfg["termination_if_distance_less_than"]
+        )
+        self.reset_buf |= reached_the_target
 
     def _reward_action_rate(self):
         # Penalize changes in actions
         return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
 
-    # TODO: переделать награду - сделать так, чтобы агентт мог обучаться без проблем
     def _reward_dist_to_target_obj(self):
+        # count distance to reacchable object
         distance = self.batch_norm(self.object_pos - self.gripper_pos)
-        object_in_air_envs = self.object_pos[..., 2] > 0.06
-        reward = -distance + 2.0
-        reward[object_in_air_envs] = 0.0
-        return reward
+        charge_reward = distance < 0.08
+        total_reward = -distance + 2.0
+        total_reward[charge_reward] += 5.0
 
-    def _reward_dist_to_target_obj_pos(self):
-        reward = self.batch_norm(self.target_pos - self.object_pos)
-        object_in_air_envs = self.object_pos[..., 2] > 0.06
-        object_on_plane = self.object_pos[..., 2] <= 0.06
-        reward[object_in_air_envs] = 5.0 - reward[object_in_air_envs]
-        reward[object_on_plane] = 0.0
-        return reward
+        # distance from object to target position
+        target_pos_dist = self.batch_norm(self.target_pos - self.object_pos)
+        objects_not_in_air = (
+            self.batch_norm(self.default_object_pos - self.object_pos) < 0.05
+        )
+        objects_to_lift = torch.logical_and(charge_reward, objects_not_in_air)
+        objects_in_air = torch.logical_not(objects_to_lift)
+        total_reward[objects_to_lift] -= target_pos_dist * 2.0
+        total_reward[objects_in_air] -= target_pos_dist * 0.5
+        total_reward[target_pos_dist < 0.08] += 10.0
+        return total_reward
 
     def close(self):
         return
