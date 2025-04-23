@@ -1,0 +1,16 @@
+services:
+  server:
+    image: nvidia/cuda:12.2.2-base-ubuntu22.04
+    build: .
+    command: python3 ./panda_train.py
+    develop:
+      watch:
+        - path: ./
+          action: rebuild
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

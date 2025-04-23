@@ -1,0 +1,9 @@
+[15:35:38] {/home/sport_bot/diplom/grasp/gr-convnet/hardware/device.py:11} INFO - CUDA detected. Running with GPU acceleration.
+[15:35:38] {/home/sport_bot/diplom/grasp/gr-convnet/./train_network.py:247} INFO - Loading Jacquard Dataset...
+[15:35:38] {/home/sport_bot/diplom/grasp/gr-convnet/./train_network.py:256} INFO - Dataset size is 5561
+[15:35:38] {/home/sport_bot/diplom/grasp/gr-convnet/./train_network.py:265} INFO - Training size: 5004
+[15:35:38] {/home/sport_bot/diplom/grasp/gr-convnet/./train_network.py:266} INFO - Validation size: 557
+[15:35:38] {/home/sport_bot/diplom/grasp/gr-convnet/./train_network.py:284} INFO - Done
+[15:35:38] {/home/sport_bot/diplom/grasp/gr-convnet/./train_network.py:287} INFO - Loading Network...
+[15:35:38] {/home/sport_bot/diplom/grasp/gr-convnet/./train_network.py:298} INFO - Done
+[15:35:40] {/home/sport_bot/diplom/grasp/gr-convnet/./train_network.py:317} INFO - Beginning Epoch 00
