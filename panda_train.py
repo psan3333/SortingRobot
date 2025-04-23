@@ -91,7 +91,7 @@ def get_cfgs():
         "num_obs": 35,
         "num_envs": 4,
         "reward_scales": {
-            "dist_to_target_obj_pos": 1.0,
+            "dist_to_target_obj": 1.0,
             "action_rate": -0.005,
         },
     }

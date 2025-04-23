@@ -355,20 +355,24 @@ class PandaSort:
     def _reward_dist_to_target_obj(self):
         # count distance to reacchable object
         distance = self.batch_norm(self.object_pos - self.gripper_pos)
-        charge_reward = distance < 0.08
+        charge_reward = distance < self.env_cfg["termination_if_distance_less_than"]
         total_reward = -distance + 2.0
         total_reward[charge_reward] += 5.0
 
         # distance from object to target position
         target_pos_dist = self.batch_norm(self.target_pos - self.object_pos)
         objects_not_in_air = (
-            self.batch_norm(self.default_object_pos - self.object_pos) < 0.05
+            torch.abs(self.default_object_pos[..., 2] - self.object_pos[..., 2]) < 0.05
         )
         objects_to_lift = torch.logical_and(charge_reward, objects_not_in_air)
-        objects_in_air = torch.logical_not(objects_to_lift)
+        objects_in_air = torch.logical_and(
+            charge_reward, torch.logical_not(objects_not_in_air)
+        )
         total_reward[objects_to_lift] -= target_pos_dist * 2.0
         total_reward[objects_in_air] -= target_pos_dist * 0.5
-        total_reward[target_pos_dist < 0.08] += 10.0
+        total_reward[
+            target_pos_dist < self.env_cfg["termination_if_distance_less_than"]
+        ] += 10.0
         return total_reward
 
     def close(self):
