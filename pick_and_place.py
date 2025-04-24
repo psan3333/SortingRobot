@@ -167,9 +167,10 @@ class PandaSort:
         self.extras = dict()
 
     def extract_grasps(self):
-        depth = np.expand_dims(self.depth_frames, axis=3)
+        envs = self.episode_length_buf.cpu().numpy() % 2 == 0
+        depth = np.expand_dims(self.depth_frames[envs], axis=3)
         rgb, depth = (
-            self.rgb_frames.transpose((0, 3, 1, 2)),
+            self.rgb_frames[envs].transpose((0, 3, 1, 2)),
             depth.transpose((0, 3, 1, 2)),
         )
         x = torch.from_numpy(np.concatenate((rgb, depth), 1))
@@ -179,23 +180,31 @@ class PandaSort:
             q_img, ang_img, width_img = post_process_output(
                 pred["pos"], pred["cos"], pred["sin"], pred["width"]
             )
+            idx = 0
             for env in range(self.num_envs):
-                grasp: Grasp = detect_grasps(
-                    q_img[env], ang_img[env], width_img[env], 1
-                )[0]
-                data = torch.tensor(
-                    [
-                        grasp.center[0],
-                        grasp.center[1],
-                        grasp.angle,
-                        grasp.length,
-                        grasp.width,
-                    ],
-                    device=self.device,
-                    dtype=gs.tc_float,
-                )
-                data = data.to(self.device)
-                self.grasps[env] = data
+                if envs[env]:
+                    grasps: List[Grasp] = detect_grasps(
+                        q_img[idx], ang_img[idx], width_img[idx], 1
+                    )
+                    idx += 1
+                    if len(grasps) > 0:
+                        grasp = grasps[0]
+                        try:
+                            data = torch.tensor(
+                                [
+                                    grasp.center[0],
+                                    grasp.center[1],
+                                    grasp.angle,
+                                    grasp.length,
+                                    grasp.width,
+                                ],
+                                device=self.device,
+                                dtype=gs.tc_float,
+                            )
+                            data = data.to(self.device)
+                            self.grasps[env] = data
+                        except Exception:
+                            pass
 
     def adjuct_camera_to_gripper(self):
         finger_pos = (
@@ -368,8 +377,10 @@ class PandaSort:
         objects_in_air = torch.logical_and(
             charge_reward, torch.logical_not(objects_not_in_air)
         )
-        total_reward[objects_to_lift] -= target_pos_dist[objects_to_lift] * 2.0
-        total_reward[objects_in_air] -= target_pos_dist[objects_to_lift] * 0.5
+        if torch.sum(objects_to_lift):
+            total_reward[objects_to_lift] -= target_pos_dist[objects_to_lift] * 2.0
+        if torch.sum(objects_in_air):
+            total_reward[objects_in_air] -= target_pos_dist[objects_in_air] * 0.5
         total_reward[
             target_pos_dist < self.env_cfg["termination_if_distance_less_than"]
         ] += 10.0
