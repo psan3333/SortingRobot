@@ -183,6 +183,7 @@ class PandaSort:
             idx = 0
             for env in range(self.num_envs):
                 if envs[env]:
+                    # TODO: проверить данные, получаемые из этой функции (снизу - возможно, их надо нормализовать)
                     grasps: List[Grasp] = detect_grasps(
                         q_img[idx], ang_img[idx], width_img[idx], 1
                     )
