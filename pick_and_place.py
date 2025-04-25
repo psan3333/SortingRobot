@@ -183,7 +183,6 @@ class PandaSort:
             idx = 0
             for env in range(self.num_envs):
                 if envs[env]:
-                    # TODO: проверить данные, получаемые из этой функции (снизу - возможно, их надо нормализовать)
                     grasps: List[Grasp] = detect_grasps(
                         q_img[idx], ang_img[idx], width_img[idx], 1
                     )
@@ -191,13 +190,14 @@ class PandaSort:
                     if len(grasps) > 0:
                         grasp = grasps[0]
                         try:
+                            # normalizing grasps depending on frame size
                             data = torch.tensor(
                                 [
-                                    grasp.center[0],
-                                    grasp.center[1],
+                                    grasp.center[0] / self.cam_size,
+                                    grasp.center[1] / self.cam_size,
                                     grasp.angle,
-                                    grasp.length,
-                                    grasp.width,
+                                    grasp.length / self.cam_size,
+                                    grasp.width / self.cam_size,
                                 ],
                                 device=self.device,
                                 dtype=gs.tc_float,
