@@ -370,21 +370,31 @@ class PandaSort:
         total_reward[charge_reward] += 5.0
 
         # distance from object to target position
-        target_pos_dist = self.batch_norm(self.target_pos - self.object_pos)
-        objects_not_in_air = (
-            torch.abs(self.default_object_pos[..., 2] - self.object_pos[..., 2]) < 0.05
-        )
-        objects_to_lift = torch.logical_and(charge_reward, objects_not_in_air)
-        objects_in_air = torch.logical_and(
-            charge_reward, torch.logical_not(objects_not_in_air)
-        )
-        if torch.sum(objects_to_lift):
-            total_reward[objects_to_lift] -= target_pos_dist[objects_to_lift] * 2.0
-        if torch.sum(objects_in_air):
-            total_reward[objects_in_air] -= target_pos_dist[objects_in_air] * 0.5
-        total_reward[
-            target_pos_dist < self.env_cfg["termination_if_distance_less_than"]
-        ] += 10.0
+        if torch.sum(charge_reward):
+            # TODO: сделать награду за прикасания к целевому объекту
+            target_pos_dist = self.batch_norm(
+                self.target_pos[charge_reward] - self.object_pos[charge_reward]
+            )
+            objects_to_lift = (
+                torch.abs(
+                    self.default_object_pos[charge_reward][..., 2]
+                    - self.object_pos[charge_reward][..., 2]
+                )
+                < 0.05
+            )
+            objects_in_air = torch.logical_not(objects_to_lift)
+            if torch.sum(objects_to_lift):
+                total_reward[charge_reward][objects_to_lift] -= (
+                    target_pos_dist[objects_to_lift] * 2.0
+                )
+            if torch.sum(objects_in_air):
+                total_reward[charge_reward][objects_in_air] -= target_pos_dist[
+                    objects_in_air
+                ]
+            total_reward[charge_reward][
+                target_pos_dist
+                < self.env_cfg["termination_if_distance_less_than"] + 0.02
+            ] += 10.0
         return total_reward
 
     def close(self):
