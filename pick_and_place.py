@@ -5,10 +5,10 @@ import math
 
 from genesis.engine.entities.rigid_entity.rigid_entity import RigidEntity, RigidJoint
 from genesis.vis.camera import Camera
+from genesis.utils.geom import transform_by_quat
 
 # from ultralytics import YOLO
 from typing import List
-from genesis.vis.camera import Camera
 from inference.models.grconvnet import GenerativeResnet
 from inference.post_process import post_process_output
 from utils.dataset_processing.grasp import detect_grasps
@@ -33,6 +33,7 @@ class PandaSort:
         self.cam_size = cam_size
         self.num_envs = env_cfg["num_envs"]
         self.num_obs = env_cfg["num_obs"]
+        self.hover_distance = 0.12
 
         # initialize Genesis
         gs.init(backend=gs.gpu, logging_level="warning")
@@ -214,12 +215,19 @@ class PandaSort:
         joint_pos = (
             self.panda_arm.get_joint(self.joint_names[-3]).get_pos().cpu().numpy()
         )
+        joint_quat = (
+            self.panda_arm.get_joint(self.joint_names[-2]).get_quat().cpu().numpy()
+        )
         for i in range(self.num_envs):
+            # orientation
             f_pos = finger_pos[i]
             j_pos = joint_pos[i]
+            j_quat = joint_quat[i]
             cam_pos = f_pos + 0.12 * (f_pos - j_pos) + self.scene.envs_offset[i]
             lookat = f_pos + 0.15 * (f_pos - j_pos) + self.scene.envs_offset[i]
-            self.robot_cams[i].set_pose(pos=cam_pos, lookat=lookat)
+            # rotation
+            up = transform_by_quat(cam_pos, j_quat)
+            self.robot_cams[i].set_pose(pos=cam_pos, lookat=lookat, up=up)
             self.rgb_frames[i], self.depth_frames[i], _, _ = self.robot_cams[i].render(
                 rgb=True, depth=True
             )
