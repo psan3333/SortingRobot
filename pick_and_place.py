@@ -22,7 +22,7 @@ class PandaSort:
         self,
         env_cfg,
         grasp_detector: GenerativeResnet,
-        cam_size=480,
+        cam_size=320,
         render=False,
         device="cuda",
     ):
@@ -72,17 +72,12 @@ class PandaSort:
         )
 
         # setup cameras for each environment
-        self.robot_cams: List[Camera] = []
-        for i in range(self.num_envs):
-            self.robot_cams.append(
-                self.scene.add_camera(
-                    res=(self.cam_size, self.cam_size),
-                    pos=(3.5, 0.0, 2.5),
-                    lookat=(0, 0, 0.5),
-                    fov=30,
-                    GUI=False,
-                )
-            )
+        self.robot_cam: Camera = self.scene.add_camera(
+            res=(self.cam_size, self.cam_size),
+            pos=(3.5, 0.0, 2.5),
+            lookat=(0, 0, 0.5),
+            GUI=False,
+        )
         self.scene.build(n_envs=self.num_envs, env_spacing=(2.0, 2.0))
 
         # set positional gains
@@ -266,17 +261,7 @@ class PandaSort:
         self.target_pos[envs_idx] = new_targets
         self.gripper_pos = self.panda_arm.get_joint(self.joint_names[-1]).get_pos()
         self.grasp_frames_counter[envs_idx] = 0
-        # change camera positions
-        for env_idx in envs_idx:
-            # set default camera position above target object
-            cam_pos: np.ndarray = (
-                self.object_pos[env_idx].cpu().numpy() + self.scene.envs_offset[env_idx]
-            )
-            lookat = cam_pos.copy()
-            cam_pos[2] = 0.8
-            up = np.array([1.0, 0.0, 0.0])
-            self.robot_cams[env_idx].set_pose(pos=cam_pos, lookat=lookat, up=up)
-            self.extract_grap_angles(env_idx)
+        self.extract_grap_angles(envs_idx)
 
         # fill extras
         self.extras["episode"] = {}
@@ -287,30 +272,45 @@ class PandaSort:
             )
             self.episode_sums[key][envs_idx] = 0.0
 
-    def extract_grap_angles(self, env_idx):
-        rgb, depth, _, _ = self.robot_cams[env_idx].render(rgb=True, depth=True)
-        depth = np.expand_dims(depth, axis=2)
+    def set_cam_pos(self, env_idx):
+        cam_pos: np.ndarray = (
+            self.object_pos[env_idx].cpu().numpy() + self.scene.envs_offset[env_idx]
+        )
+        lookat = cam_pos.copy()
+        cam_pos[2] = 0.8
+        up = np.array([1.0, 0.0, 0.0])
+        self.robot_cam.set_pose(pos=cam_pos, lookat=lookat, up=up)
+
+    def extract_grap_angles(self, envs_idx):
+        # TODO: make batch inference for grasp neural network
+        rgb = np.zeros(
+            (len(envs_idx), self.cam_size, self.cam_size, 3), dtype=np.float32
+        )
+        depth = np.zeros(
+            (len(envs_idx), self.cam_size, self.cam_size), dtype=np.float32
+        )
+        for i, env_idx in enumerate(envs_idx):
+            self.set_cam_pos(env_idx)
+            rgb[i], depth[i], _, _ = self.robot_cam.render(rgb=True, depth=True)
+
+        depth = np.expand_dims(depth, axis=3)
         rgb, depth = (
-            rgb.transpose((2, 0, 1)),
-            depth.transpose((2, 0, 1)),
+            rgb.transpose((0, 3, 1, 2)),
+            depth.transpose((0, 3, 1, 2)),
         )
-        x = torch.from_numpy(
-            np.expand_dims(np.concatenate((rgb, depth), axis=0), axis=0)
-        )
+        x = torch.from_numpy(np.concatenate((rgb, depth), axis=1))
         with torch.no_grad():
-            ten_grasp_angles = []
-            num_steps = 0
-            while len(ten_grasp_angles) < 10 and num_steps < 15:
-                xc = x.to(self.device)
-                pred = self.grasp_detector.predict(xc)
-                q_img, ang_img, width_img = post_process_output(
-                    pred["pos"], pred["cos"], pred["sin"], pred["width"]
+            xc = x.to(self.device)
+            pred = self.grasp_detector.predict(xc)
+            q_img, ang_img, width_img = post_process_output(
+                pred["pos"], pred["cos"], pred["sin"], pred["width"]
+            )
+            for i, env_idx in enumerate(envs_idx):
+                env_grasps: List[Grasp] = detect_grasps(
+                    q_img[i], ang_img[i], width_img[i], 3
                 )
-                env_grasps: List[Grasp] = detect_grasps(q_img, ang_img, width_img, 3)
-                ten_grasp_angles.append(env_grasps[0].angle)
-                num_steps += 1
-            if len(ten_grasp_angles) > 0:
-                self.grasp_angles[env_idx] = np.array(ten_grasp_angles).mean()
+                if len(env_grasps) > 0:
+                    self.grasp_angles[env_idx] = env_grasps[0].angle
 
     def get_observations(self):
         return self.obs_buf
@@ -320,7 +320,6 @@ class PandaSort:
 
     def get_dofs_for_grasp(self, envs_idx):
         zeros = torch.zeros((len(envs_idx), 2), device=self.device, dtype=gs.tc_float)
-        print(zeros.shape, self.dof_pos.shape, envs_idx)
         dofs_pos = torch.cat([self.dof_pos[envs_idx], zeros], dim=-1)
         return dofs_pos
 
