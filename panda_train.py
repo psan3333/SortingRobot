@@ -38,7 +38,7 @@ def get_train_cfg(exp_name):
             "experiment_name": exp_name,
             "load_run": -1,
             "log_interval": 1,
-            "max_iterations": 100000,
+            "max_iterations": 10000,
             "num_steps_per_env": 24,
             "policy_class_name": "ActorCritic",
             "record_interval": -1,
@@ -82,14 +82,14 @@ def get_cfgs():
             "finger_joint2",
         ],
         # termination
-        "termination_if_distance_less_than": 0.08,
+        "termination_if_distance_less_than": 0.01,
         # base pose
         "episode_length_s": 10.0,
         "action_scale": 0.25,
         "simulate_action_latency": True,
         "clip_actions": 100.0,
         "num_obs": 26,
-        "num_envs": 32,
+        "num_envs": 16,
         "reward_scales": {
             "dist_to_target_obj": 1.0,
             "action_rate": -0.005,
@@ -100,6 +100,8 @@ def get_cfgs():
 
 if __name__ == "__main__":
     # Создание и обучение
+
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
     exp_name = f"PandaSort_{datetime.today().strftime('%Y-%m-%d_%H:%M:%S')}"
     log_dir = f"logs/{exp_name}"

@@ -35,7 +35,7 @@ class PandaSort:
         self.cam_size = cam_size
         self.num_envs = env_cfg["num_envs"]
         self.num_obs = env_cfg["num_obs"]
-        self.hover_distance = 0.25
+        self.hover_distance = 0.4
         self.num_actions = env_cfg[
             "num_actions"
         ]  # agent doesn't control gripper's fingers -> 7
@@ -135,7 +135,9 @@ class PandaSort:
         self.depth_frames = np.zeros(
             (self.num_envs, self.cam_size, self.cam_size), dtype=np.float32
         )
-        self.grasp_angles = np.zeros((self.num_envs,), dtype=np.float32)
+        self.grasp_angles = torch.zeros(
+            (self.num_envs,), device=self.device, dtype=gs.tc_float
+        )
         self.on_ground_discount = torch.zeros(
             self.num_envs, device=self.device, dtype=gs.tc_float
         )
@@ -230,6 +232,7 @@ class PandaSort:
         self.object.set_pos(pos=pick_object_pos, envs_idx=envs_idx)
         self.object_pos[envs_idx] = self.object.get_pos(envs_idx=envs_idx)
         self.default_object_pos[envs_idx] = self.object.get_pos(envs_idx=envs_idx)
+        pick_object_pos[..., 2] = 0.025
         hover_targets = torch.clone(pick_object_pos)
         hover_targets[..., 2] = self.hover_distance
         lift_dest_targets = torch.cat(
@@ -237,8 +240,8 @@ class PandaSort:
                 torch.rand(
                     (num_envs_to_reset, 1), device=self.device, dtype=gs.tc_float
                 )
-                * 0.5
-                + 0.1,  # x
+                * 0.1
+                + 0.4,  # x
                 torch.rand(
                     (num_envs_to_reset, 1), device=self.device, dtype=gs.tc_float
                 )
@@ -309,7 +312,7 @@ class PandaSort:
                     q_img[i], ang_img[i], width_img[i], 3
                 )
                 if len(env_grasps) > 0:
-                    self.grasp_angles[env_idx] = env_grasps[0].angle
+                    self.grasp_angles[env_idx] = float(env_grasps[0].angle)
 
     def get_observations(self):
         return self.obs_buf
@@ -320,6 +323,7 @@ class PandaSort:
     def get_dofs_for_grasp(self, envs_idx):
         zeros = torch.zeros((len(envs_idx), 2), device=self.device, dtype=gs.tc_float)
         dofs_pos = torch.cat([self.dof_pos[envs_idx], zeros], dim=-1)
+        dofs_pos[:, -3] = self.grasp_angles[envs_idx]
         return dofs_pos
 
     def step(self, actions):
@@ -384,10 +388,12 @@ class PandaSort:
         self.obs_buf = torch.cat(
             [
                 self.object_pos - self.gripper_pos,  # 3
-                self.target_pos[self.all_envs_idx, self.task_number].squeeze()
+                self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
                 - self.object_pos,  # 3
                 self.object_pos,  # 3
-                self.target_pos[self.all_envs_idx, self.task_number].squeeze(),  # 3
+                self.target_pos[self.all_envs_idx, self.task_number].squeeze(
+                    dim=1
+                ),  # 3
                 self.dof_pos,  # 7
                 self.actions,  # 7
             ],
@@ -400,11 +406,17 @@ class PandaSort:
     def check_for_reset(self):
         self.reset_buf = self.episode_length_buf > self.max_episode_length
         reached_the_target = torch.logical_and(
-            self.batch_norm(self.target_pos[:, 2] - self.object_pos)
+            self.batch_norm(
+                self.target_pos[self.all_envs_idx, 2].squeeze(dim=1) - self.object_pos
+            )
             < self.env_cfg["termination_if_distance_less_than"],
             self.task_number == 2,
         )
+        error_task_number = self.task_number >= 3
+        if torch.sum(error_task_number) > 0:
+            print("Some shit in code")
         self.reset_buf |= reached_the_target
+        self.reset_buf |= error_task_number
 
     def _reward_action_rate(self):
         # Penalize changes in actions
@@ -412,23 +424,32 @@ class PandaSort:
 
     def _reward_dist_to_target_obj(self):
         # count distance to reachable object
-        distance = self.batch_norm(
-            self.target_pos[self.all_envs_idx, self.task_number].squeeze()
+        distance_to_task = self.batch_norm(
+            self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
             - self.gripper_pos
         )
-        charge_reward = distance < self.env_cfg["termination_if_distance_less_than"]
-        total_reward = -distance + 2.0
-        total_reward[charge_reward] += 5.0
-        grasping_step = torch.logical_and(charge_reward, self.task_number == 1)
+        distance_to_overall_target = self.batch_norm(
+            self.target_pos[self.all_envs_idx, 2].squeeze(dim=1) - self.object_pos
+        )
+        charge_reward_envs = (
+            distance_to_task < self.env_cfg["termination_if_distance_less_than"]
+        )
+        total_reward = -distance_to_task + 2.0
+        total_reward[charge_reward_envs] += 5.0
+        envs_for_grasping = torch.logical_and(charge_reward_envs, self.task_number == 1)
         self.grasp_frames_counter[
-            torch.logical_or(grasping_step, self.grasp_frames_counter > 0)
+            torch.logical_or(envs_for_grasping, self.grasp_frames_counter > 0)
         ] += 1
         total_reward[
-            torch.logical_or(grasping_step, self.grasp_frames_counter > 0)
+            torch.logical_or(envs_for_grasping, self.grasp_frames_counter > 0)
         ] += 2.0  # reward agent for achieving grasping step
-        stop_grasping = self.grasp_frames_counter >= self.grasp_frame_cnt_limit
-        self.grasp_frames_counter[stop_grasping] = 0
-        self.task_number[charge_reward] += 1
+        stop_grasping_envs = self.grasp_frames_counter >= self.grasp_frame_cnt_limit
+        self.grasp_frames_counter[stop_grasping_envs] = 0
+        last_task_envs = self.task_number == 2
+        total_reward[last_task_envs] += (
+            -distance_to_overall_target[last_task_envs] * 2.0 + 4.0
+        )
+        self.task_number[charge_reward_envs] += 1
         return total_reward
 
         # change task number
