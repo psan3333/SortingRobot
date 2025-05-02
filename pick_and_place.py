@@ -22,7 +22,7 @@ class PandaSort:
         self,
         env_cfg,
         grasp_detector: GenerativeResnet,
-        cam_size=224,
+        cam_size=480,
         render=False,
         device="cuda",
     ):
@@ -35,10 +35,10 @@ class PandaSort:
         self.cam_size = cam_size
         self.num_envs = env_cfg["num_envs"]
         self.num_obs = env_cfg["num_obs"]
-        self.hover_distance = 0.3
+        self.hover_distance = 0.25
         self.num_actions = env_cfg[
             "num_actions"
-        ]  # robot has only 9 joints to control, but fingers will be controled by algorithm
+        ]  # agent doesn't control gripper's fingers -> 7
 
         # initialize Genesis
         gs.init(backend=gs.gpu, logging_level="warning")
@@ -153,8 +153,13 @@ class PandaSort:
         # robot data
         self.dof_pos = torch.zeros_like(self.actions)
         self.dof_vel = torch.zeros_like(self.actions)
+        self.default_grasp = torch.tensor(
+            [0.04, 0.04], device=self.device, dtype=gs.tc_float
+        ).repeat(self.num_envs, 1)
         self.gripper_pos = self.panda_arm.get_joint(self.joint_names[-1]).get_pos()
-        self.default_dofs_pos = self.panda_arm.get_dofs_position(self.motor_dofs)
+        self.default_dofs_pos = self.panda_arm.get_dofs_position(self.motor_dofs)[
+            :, : self.num_actions
+        ]
 
         # agent target data
         self.object_pos = self.object.get_pos()
@@ -189,15 +194,17 @@ class PandaSort:
 
     def reset_idx(self, envs_idx):
         self.dof_pos[envs_idx] = self.default_dofs_pos[envs_idx]
-        self.dof_pos[envs_idx, -2:] = 0.04
         self.dof_vel[envs_idx] = 0.0
         self.panda_arm.set_dofs_position(
-            position=self.dof_pos[envs_idx],
+            position=torch.cat(
+                [self.dof_pos[envs_idx], self.default_grasp[envs_idx]], dim=-1
+            ),
             dofs_idx_local=self.motor_dofs,
             zero_velocity=True,
             envs_idx=envs_idx,
         )
         self.panda_arm.zero_all_dofs_velocity(envs_idx)
+        num_envs_to_reset = torch.sum(envs_idx)
 
         # reset buffers
         self.last_actions[envs_idx] = 0.0
@@ -205,14 +212,18 @@ class PandaSort:
         self.reset_buf[envs_idx] = True
         pick_object_pos = torch.cat(
             [
-                torch.rand((len(envs_idx), 1), device=self.device, dtype=gs.tc_float)
+                torch.rand(
+                    (num_envs_to_reset, 1), device=self.device, dtype=gs.tc_float
+                )
                 * 0.6
                 + 0.1,  # x
-                torch.rand((len(envs_idx), 1), device=self.device, dtype=gs.tc_float)
+                torch.rand(
+                    (num_envs_to_reset, 1), device=self.device, dtype=gs.tc_float
+                )
                 * 0.6
                 - 0.3,  # y
                 torch.tensor([0.05], device=self.device, dtype=gs.tc_float).repeat(
-                    len(envs_idx), 1
+                    num_envs_to_reset, 1
                 ),  # z
             ],
             dim=-1,
@@ -220,18 +231,22 @@ class PandaSort:
         self.object.set_pos(pos=pick_object_pos, envs_idx=envs_idx)
         self.object_pos[envs_idx] = self.object.get_pos(envs_idx=envs_idx)
         self.default_object_pos[envs_idx] = self.object.get_pos(envs_idx=envs_idx)
-        hover_targets: torch.Tensor = pick_object_pos.copy_()
+        hover_targets = torch.clone(pick_object_pos)
         hover_targets[..., 2] = self.hover_distance
         lift_dest_targets = torch.cat(
             [
-                torch.rand((len(envs_idx), 1), device=self.device, dtype=gs.tc_float)
+                torch.rand(
+                    (num_envs_to_reset, 1), device=self.device, dtype=gs.tc_float
+                )
                 * 0.5
                 + 0.1,  # x
-                torch.rand((len(envs_idx), 1), device=self.device, dtype=gs.tc_float)
+                torch.rand(
+                    (num_envs_to_reset, 1), device=self.device, dtype=gs.tc_float
+                )
                 * 0.6
                 - 0.3,  # y
                 torch.tensor([0.5], device=self.device, dtype=gs.tc_float).repeat(
-                    len(envs_idx), 1
+                    num_envs_to_reset, 1
                 ),  # z
             ],
             dim=-1,
@@ -251,13 +266,14 @@ class PandaSort:
         for i in range(self.num_envs):
             if envs_idx[i]:
                 # set default camera position above target object
-                cam_pos = self.object_pos[i] + self.scene.envs_offset[i]
+                cam_pos: np.ndarray = (
+                    self.object_pos[i].cpu().numpy() + self.scene.envs_offset[i]
+                )
+                lookat = cam_pos.copy()
                 cam_pos[2] = 0.8
-                lookat = self.object_pos[i] + self.scene.envs_offset[i]
                 up = np.array([1.0, 0.0, 0.0])
                 self.robot_cams[i].set_pose(pos=cam_pos, lookat=lookat, up=up)
-
-        self.extract_grap_angles(envs_idx)
+                self.extract_grap_angles(i)
 
         # fill extras
         self.extras["episode"] = {}
@@ -297,8 +313,8 @@ class PandaSort:
         return
 
     def get_dofs_for_grasp(self, envs_idx):
+        zeros = torch.zeros((len()))
         dofs_pos = self.dof_pos[envs_idx]
-        dofs_pos[-2:] = 0.0
         return dofs_pos
 
     def step(self, actions):
@@ -311,7 +327,7 @@ class PandaSort:
         target_dof_pos = (
             exec_actions * self.env_cfg["action_scale"] + self.default_dofs_pos
         )
-        target_dof_pos = torch.cat([target_dof_pos, self.dof_pos[:, -2:]], dim=-1)
+        target_dof_pos = torch.cat([target_dof_pos, self.default_grasp], dim=-1)
         grasp_task = self.grasp_frames_counter > 0
         dof_pos_for_grasp = self.get_dofs_for_grasp(grasp_task)
         self.panda_arm.control_dofs_position(
@@ -324,8 +340,12 @@ class PandaSort:
 
         # update counter
         self.episode_length_buf += 1
-        self.dof_pos[:] = self.panda_arm.get_dofs_position(self.motor_dofs)
-        self.dof_vel[:] = self.panda_arm.get_dofs_velocity(self.motor_dofs)
+        self.dof_pos[:] = self.panda_arm.get_dofs_position(self.motor_dofs)[
+            :, : self.num_actions
+        ]
+        self.dof_vel[:] = self.panda_arm.get_dofs_velocity(self.motor_dofs)[
+            :, : self.num_actions
+        ]
         self.gripper_pos[:] = self.panda_arm.get_joint(self.joint_names[-1]).get_pos()
 
         time_out_idx = (
@@ -354,8 +374,8 @@ class PandaSort:
                 self.target_pos[:, self.task_number] - self.object_pos,  # 3
                 self.object_pos,  # 3
                 self.target_pos[:, self.task_number],  # 3
-                self.dof_pos,  # 9
-                self.actions,  # 9
+                self.dof_pos,  # 7
+                self.actions,  # 7
             ],
             axis=-1,
         )
