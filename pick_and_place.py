@@ -282,7 +282,6 @@ class PandaSort:
         self.robot_cam.set_pose(pos=cam_pos, lookat=lookat, up=up)
 
     def extract_grap_angles(self, envs_idx):
-        # TODO: make batch inference for grasp neural network
         rgb = np.zeros(
             (len(envs_idx), self.cam_size, self.cam_size, 3), dtype=np.float32
         )
@@ -335,18 +334,20 @@ class PandaSort:
         )
         target_dof_pos = torch.cat([target_dof_pos, self.default_grasp], dim=-1)
         grasp_task = self.grasp_frames_counter > 0
-        dof_pos_for_grasp = self.get_dofs_for_grasp(
-            grasp_task.nonzero(as_tuple=False).flatten()
-        )
+        grasp_envs_idx = grasp_task.nonzero(as_tuple=False).flatten()
+        dof_pos_for_grasp = self.get_dofs_for_grasp(grasp_envs_idx)
         self.panda_arm.control_dofs_position(
             dof_pos_for_grasp,
             self.motor_dofs,
-            envs_idx=grasp_task.nonzero(as_tuple=False).flatten(),
+            envs_idx=grasp_envs_idx,
+        )
+        target_envs_idx = (
+            torch.logical_not(grasp_task).nonzero(as_tuple=False).flatten()
         )
         self.panda_arm.control_dofs_position(
-            target_dof_pos,
+            target_dof_pos[target_envs_idx],
             self.motor_dofs,
-            envs_idx=torch.logical_not(grasp_task).nonzero(as_tuple=False).flatten(),
+            envs_idx=target_envs_idx,
         )
         self.scene.step()
 
