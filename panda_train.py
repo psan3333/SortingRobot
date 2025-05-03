@@ -57,7 +57,7 @@ def get_train_cfg(exp_name):
 
 def get_cfgs():
     env_cfg = {
-        "num_actions": 7,
+        "num_actions": 5,
         # joint/link names
         "default_joint_angles": {  # [rad]
             "joint1": 0.0,
@@ -88,7 +88,7 @@ def get_cfgs():
         "action_scale": 0.25,
         "simulate_action_latency": True,
         "clip_actions": 100.0,
-        "num_obs": 26,
+        "num_obs": 22,
         "num_envs": 16,
         "reward_scales": {
             "dist_to_target_obj": 1.0,
