@@ -42,7 +42,7 @@ def get_train_cfg(exp_name):
             "experiment_name": exp_name,
             "load_run": -1,
             "log_interval": 1,
-            "max_iterations": 10000,
+            "max_iterations": 20001,
             "num_steps_per_env": 24,
             "policy_class_name": "ActorCritic",
             "record_interval": -1,
@@ -50,7 +50,7 @@ def get_train_cfg(exp_name):
             "resume_path": None,
             "run_name": "",
             "runner_class_name": "runner_class_name",
-            "save_interval": 100,
+            "save_interval": 1000,
         },
         "runner_class_name": "OnPolicyRunner",
         "seed": 1,
@@ -61,7 +61,7 @@ def get_train_cfg(exp_name):
 
 def get_cfgs():
     env_cfg = {
-        "num_actions": 7,
+        "num_actions": 5,
         # joint/link names
         "default_joint_angles": {  # [rad]
             "joint1": 0.0,
@@ -92,7 +92,7 @@ def get_cfgs():
         "action_scale": 0.25,
         "simulate_action_latency": True,
         "clip_actions": 100.0,
-        "num_obs": 26,
+        "num_obs": 22,
         "num_envs": 1,
         "reward_scales": {
             "dist_to_target_obj": 1.0,

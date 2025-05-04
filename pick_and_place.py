@@ -2,6 +2,7 @@ import genesis as gs
 import numpy as np
 import torch
 import math
+import logging
 
 from genesis.engine.entities.rigid_entity.rigid_entity import RigidEntity, RigidJoint
 from genesis.vis.camera import Camera
@@ -26,6 +27,9 @@ class PandaSort:
         render=False,
         device="cuda",
     ):
+        logging.basicConfig(
+            level=logging.INFO, filename=f"text_logs/logs.log", filemode="w"
+        )
         self.device = torch.device(device)
         self.dt = 0.01  # сколько времени длится один кадр
         self.env_cfg = env_cfg
@@ -198,10 +202,16 @@ class PandaSort:
             return
         self.dofs_pos[envs_idx] = self.default_dofs_pos[envs_idx]
         self.dofs_vel[envs_idx] = 0.0
+        new_dofs = torch.cat(
+            [
+                self.dofs_pos[envs_idx],
+                torch.zeros((len(envs_idx), 2), device=self.device, dtype=gs.tc_float),
+                self.default_grasp[envs_idx],
+            ],
+            dim=-1,
+        )
         self.panda_arm.set_dofs_position(
-            position=torch.cat(
-                [self.dofs_pos[envs_idx], self.default_grasp[envs_idx]], dim=-1
-            ),
+            position=new_dofs,
             dofs_idx_local=self.motor_dofs,
             zero_velocity=True,
             envs_idx=envs_idx,
@@ -217,8 +227,8 @@ class PandaSort:
                 torch.rand(
                     (num_envs_to_reset, 1), device=self.device, dtype=gs.tc_float
                 )
-                * 0.6
-                + 0.1,  # x
+                * 0.1
+                + 0.3,  # x
                 torch.rand(
                     (num_envs_to_reset, 1), device=self.device, dtype=gs.tc_float
                 )
@@ -242,7 +252,7 @@ class PandaSort:
                     (num_envs_to_reset, 1), device=self.device, dtype=gs.tc_float
                 )
                 * 0.1
-                + 0.4,  # x
+                + 0.3,  # x
                 torch.rand(
                     (num_envs_to_reset, 1), device=self.device, dtype=gs.tc_float
                 )
@@ -322,22 +332,23 @@ class PandaSort:
         return
 
     def get_gripper_angles(self):
-        gripper_angle = self.dofs_pos[:, 1] - (
-            0.0 if self.dofs_pos[:, 3] > 0 else self.dofs_pos[:, 3]
-        )
+        get_angle_from_second_joint = self.dofs_pos[:, 3] < 0
+        gripper_angle = self.dofs_pos[:, 1]
+        gripper_angle[get_angle_from_second_joint] -= self.dofs_pos[
+            get_angle_from_second_joint, 3
+        ]
         gripper_fingers_angle = (
             self.dofs_pos[:, 0] + self.gripper_fingers_angle_offset + self.grasp_angles
         )
-        return torch.tensor(
-            [gripper_angle, gripper_fingers_angle],
-            device=self.device,
-            dtype=gs.tc_float,
+        return torch.cat(
+            [gripper_angle.unsqueeze(1), gripper_fingers_angle.unsqueeze(1)], dim=-1
         )
 
     def get_dofs_for_grasp(self, envs_idx):
         zeros = torch.zeros((len(envs_idx), 2), device=self.device, dtype=gs.tc_float)
         dofs_pos = torch.cat(
-            [self.dofs_pos[envs_idx], self.get_gripper_angles(), zeros], dim=-1
+            [self.dofs_pos[envs_idx], self.get_gripper_angles()[envs_idx], zeros],
+            dim=-1,
         )
         return dofs_pos
 
@@ -355,6 +366,7 @@ class PandaSort:
         target_dof_pos = torch.cat(
             [target_dof_pos, gripper_angles, self.default_grasp], dim=-1
         )
+        target_dof_pos[self.task_number == 2, -2:] = 0.0
         grasp_task = self.grasp_frames_counter > 0
         grasp_envs_idx = grasp_task.nonzero(as_tuple=False).flatten()
         dof_pos_for_grasp = self.get_dofs_for_grasp(grasp_envs_idx)
@@ -432,13 +444,16 @@ class PandaSort:
         )
         error_task_number = self.task_number >= 3
         if torch.sum(error_task_number) > 0:
-            print("Some shit in code")
+            logging.error("Some shit in code")
         self.reset_buf |= reached_the_target
         self.reset_buf |= error_task_number
 
     def _reward_action_rate(self):
         # Penalize changes in actions
         return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
+
+    def _reward_velocity_penalty(self):
+        pass
 
     def _reward_dist_to_target_obj(self):
         # count distance to reachable object
@@ -468,8 +483,10 @@ class PandaSort:
             -distance_to_overall_target[last_task_envs] * 2.0 + 4.0
         )
         self.task_number[charge_reward_envs] += 1
+        if torch.sum(self.task_number == 1):
+            logging.info(f"Hovered over target: {torch.sum(self.task_number == 1)}")
         if torch.sum(self.task_number == 2):
-            print("Reached final task!")
+            logging.info(f"Grabbing object: {torch.sum(self.task_number == 2)}")
         return total_reward
 
         # change task number
