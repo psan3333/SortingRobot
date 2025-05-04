@@ -47,6 +47,7 @@ class PandaSort:
 
         # initialize Genesis
         gs.init(backend=gs.gpu, logging_level="warning")
+        logging.info("Logging started!")
         self.device = torch.device(device)
         self.scene: gs.Scene = gs.Scene(
             sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
@@ -483,11 +484,14 @@ class PandaSort:
             -distance_to_overall_target[last_task_envs] * 2.0 + 4.0
         )
         self.task_number[charge_reward_envs] += 1
-        if torch.sum(self.task_number == 1):
-            logging.info(f"Hovered over target: {torch.sum(self.task_number == 1)}")
-        if torch.sum(self.task_number == 2):
-            logging.info(f"Grabbing object: {torch.sum(self.task_number == 2)}")
-        return total_reward
+        charging_reward = torch.sum(charge_reward_envs)
+        second_task_started = torch.sum(self.task_number == 1)
+        last_task_started = torch.sum(self.task_number == 2)
+        if second_task_started and charging_reward:
+            logging.info(f"Hovered over target: {second_task_started}")
+        if last_task_started and charging_reward:
+            logging.info(f"Grabbing object: {last_task_started}")
+        return torch.exp(total_reward)
 
         # change task number
 
