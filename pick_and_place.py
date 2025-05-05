@@ -417,7 +417,12 @@ class PandaSort:
 
         self.obs_buf = torch.cat(
             [
-                self.object_pos - self.gripper_pos,  # 3
+                self.batch_norm(
+                    self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
+                    - self.gripper_pos
+                ).unsqueeze(
+                    dim=1
+                ),  # 1
                 self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
                 - self.object_pos,  # 3
                 self.object_pos,  # 3
@@ -487,7 +492,7 @@ class PandaSort:
             logging.info(f"Hovered over target: {second_task_started}")
         if last_task_started and charging_reward:
             logging.info(f"Grabbing object: {last_task_started}")
-        return torch.exp(total_reward)
+        return total_reward
 
         # change task number
 
