@@ -100,8 +100,8 @@ class PandaSort:
             dofs_idx_local=self.motor_dofs,
         )
         self.panda_arm.set_dofs_force_range(
-            lower=np.array([-87, -87, -87, -87, -12, -12, -12, -100, -100]),
-            upper=np.array([87, 87, 87, 87, 12, 12, 12, 100, 100]),
+            lower=np.array([-87, -87, -87, -87, -12, -87, -87, -100, -100]),
+            upper=np.array([87, 87, 87, 87, 12, 87, 87, 100, 100]),
             dofs_idx_local=self.motor_dofs,
         )
 
@@ -144,9 +144,6 @@ class PandaSort:
         self.grasp_angles = torch.zeros(
             (self.num_envs,), device=self.device, dtype=gs.tc_float
         )
-        self.on_ground_discount = torch.zeros(
-            self.num_envs, device=self.device, dtype=gs.tc_float
-        )
 
         self.actions = torch.zeros(
             (self.num_envs, self.num_actions), device=self.device, dtype=gs.tc_float
@@ -187,7 +184,7 @@ class PandaSort:
         )
         self.grasp_frame_cnt_limit = torch.zeros(
             (self.num_envs,), device=self.device, dtype=torch.int64
-        ).fill_(50)
+        ).fill_(30)
         self.all_envs_idx = torch.arange(
             0, self.num_envs, device=self.device, dtype=torch.int64
         )
@@ -277,6 +274,8 @@ class PandaSort:
         self.gripper_pos = self.panda_arm.get_joint(self.joint_names[-1]).get_pos()
         self.grasp_frames_counter[envs_idx] = 0
         self.extract_grap_angles(envs_idx)
+        self.task_number[envs_idx] = 0
+        self.grasp_frames_counter[envs_idx] = 0
 
         # fill extras
         self.extras["episode"] = {}
@@ -467,6 +466,7 @@ class PandaSort:
         )
         total_reward = -distance_to_task + 2.0
         total_reward *= self.task_number + 1
+        total_reward[charge_reward_envs] += 5.0
         envs_for_grasping = torch.logical_and(charge_reward_envs, self.task_number == 1)
         self.grasp_frames_counter[
             torch.logical_or(envs_for_grasping, self.grasp_frames_counter > 0)
