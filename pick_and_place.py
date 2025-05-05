@@ -460,9 +460,14 @@ class PandaSort:
     def _reward_dist_to_target_obj(self):
         # count distance to reachable object
         try:
+            last_task_envs = self.task_number == 2
             distance_to_task = self.batch_norm(
                 self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
                 - self.gripper_pos
+            )
+            distance_to_task[last_task_envs] = self.batch_norm(
+                self.target_pos[last_task_envs, 2].squeeze(dim=1)
+                - self.object_pos[last_task_envs]
             )
             charge_reward_envs = (
                 distance_to_task < self.env_cfg["termination_if_distance_less_than"]
@@ -481,16 +486,12 @@ class PandaSort:
             ] = 3.0  # reward agent for achieving grasping step
             stop_grasping_envs = self.grasp_frames_counter >= self.grasp_frame_cnt_limit
             self.grasp_frames_counter[stop_grasping_envs] = 0
-            total_reward[
-                torch.logical_and(charge_reward_envs, self.task_number == 2)
-            ] += 15.0
-            update_task_number = torch.logical_or(
-                torch.logical_and(
-                    charge_reward_envs, torch.logical_not(envs_for_grasping)
-                ),
-                stop_grasping_envs,
+            total_reward[torch.logical_and(charge_reward_envs, last_task_envs)] += 15.0
+            update_task_number = (
+                torch.logical_and(charge_reward_envs, self.grasp_frames_counter == 0),
             )
             self.task_number[update_task_number] += 1
+            self.task_number[self.task_number > 2] = 2
             charging_reward = torch.sum(charge_reward_envs)
             second_task_started = torch.sum(self.task_number == 1)
             last_task_started = torch.sum(self.task_number == 2)
