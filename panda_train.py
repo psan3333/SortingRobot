@@ -88,10 +88,11 @@ def get_cfgs():
         "action_scale": 0.25,
         "simulate_action_latency": True,
         "clip_actions": 100.0,
-        "num_obs": 20,
+        "num_obs": 34,
         "num_envs": 32,
         "reward_scales": {
             "dist_to_target_obj": 1.0,
+            "high_velocity_penalty": -0.1,
             "action_rate": -0.005,
         },
     }
@@ -115,8 +116,8 @@ if __name__ == "__main__":
     env = PandaSort(env_cfg, grasp_detector=grasp_detector, render=False)
     runner = OnPolicyRunner(env, train_cfg, log_dir, device="cuda")
     # if env_cfg["get_weights"]:
-    resume_path = "./agent.pt"
-    runner.load(resume_path)
+    # resume_path = "./agent.pt"
+    # runner.load(resume_path)
     runner.learn(
         num_learning_iterations=max_iterations,
         init_at_random_ep_len=True,

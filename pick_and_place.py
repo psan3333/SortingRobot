@@ -4,12 +4,12 @@ import torch
 import math
 import logging
 
-from genesis.engine.entities.rigid_entity.rigid_entity import RigidEntity, RigidJoint
+from genesis.engine.entities.rigid_entity.rigid_entity import RigidEntity
 from genesis.vis.camera import Camera
-from genesis.utils.geom import transform_by_quat
 
 # from ultralytics import YOLO
 from typing import List
+from datetime import datetime
 from inference.models.grconvnet import GenerativeResnet
 from inference.post_process import post_process_output
 from utils.dataset_processing.grasp import detect_grasps
@@ -47,7 +47,9 @@ class PandaSort:
 
         # initialize Genesis
         gs.init(backend=gs.gpu, logging_level="warning")
-        logging.info("Logging started!")
+        logging.info(
+            f"{datetime.today().strftime('%Y-%m-%d_%H:%M:%S')} - Logging started!"
+        )
         self.device = torch.device(device)
         self.scene: gs.Scene = gs.Scene(
             sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
@@ -413,8 +415,6 @@ class PandaSort:
             self.rew_buf += rew
             self.episode_sums[name] += rew
 
-        if torch.sum(self.task_number > 2):
-            logging.error("Problem!!!! - shit with indexing")
         dist = self.batch_norm(
             self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
             - self.gripper_pos
@@ -424,12 +424,17 @@ class PandaSort:
             [
                 dist.unsqueeze(dim=1),  # 1
                 self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
+                - self.gripper_pos,  # 3
+                self.gripper_pos - self.object_pos,  # 3
+                self.target_pos[self.all_envs_idx, 2].squeeze(dim=1)
                 - self.object_pos,  # 3
-                self.object_pos,  # 3
                 self.target_pos[self.all_envs_idx, self.task_number].squeeze(
                     dim=1
                 ),  # 3
+                self.object_pos,  # 3
+                self.gripper_pos,  # 3
                 self.dofs_pos,  # 5
+                self.dofs_vel,  # 5
                 self.actions,  # 5
             ],
             axis=-1,
@@ -447,15 +452,14 @@ class PandaSort:
             < self.env_cfg["termination_if_distance_less_than"],
             self.task_number == 2,
         )
-        error_task_number = self.task_number > 2
-        if torch.sum(error_task_number):
-            logging.error("Some shit in code")
         self.reset_buf |= reached_the_target
-        self.reset_buf |= error_task_number
 
     def _reward_action_rate(self):
         # Penalize changes in actions
         return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
+
+    def _reward_high_velocity_penalty(self):
+        return torch.sum(torch.square(self.dofs_vel), dim=1)
 
     def _reward_dist_to_target_obj(self):
         # count distance to reachable object
@@ -487,18 +491,19 @@ class PandaSort:
             stop_grasping_envs = self.grasp_frames_counter >= self.grasp_frame_cnt_limit
             self.grasp_frames_counter[stop_grasping_envs] = 0
             total_reward[torch.logical_and(charge_reward_envs, last_task_envs)] += 15.0
-            update_task_number = (
-                torch.logical_and(charge_reward_envs, self.grasp_frames_counter == 0),
-            )
-            self.task_number[update_task_number] += 1
+            self.task_number[charge_reward_envs] += 1
             self.task_number[self.task_number > 2] = 2
             charging_reward = torch.sum(charge_reward_envs)
             second_task_started = torch.sum(self.task_number == 1)
             last_task_started = torch.sum(self.task_number == 2)
             if second_task_started and charging_reward:
-                logging.info(f"Hovered over target: {second_task_started}")
+                logging.info(
+                    f"{datetime.today().strftime('%Y-%m-%d_%H:%M:%S')} - Hovered over target: {second_task_started}"
+                )
             if last_task_started and charging_reward:
-                logging.info(f"Grabbing object: {last_task_started}")
+                logging.info(
+                    f"{datetime.today().strftime('%Y-%m-%d_%H:%M:%S')} - Grabbing object: {last_task_started}"
+                )
             return total_reward
         except Exception as e:
             print(e)
