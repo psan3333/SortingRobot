@@ -182,9 +182,7 @@ class PandaSort:
         self.grasp_frames_counter = torch.zeros(
             (self.num_envs,), device=self.device, dtype=torch.int64
         )
-        self.grasp_frame_cnt_limit = torch.zeros(
-            (self.num_envs,), device=self.device, dtype=torch.int64
-        ).fill_(30)
+        self.grasp_frame_cnt_limit = 30
         self.all_envs_idx = torch.arange(
             0, self.num_envs, device=self.device, dtype=torch.int64
         )
@@ -415,14 +413,16 @@ class PandaSort:
             self.rew_buf += rew
             self.episode_sums[name] += rew
 
+        if torch.sum(self.task_number > 2):
+            logging.error("Problem!!!! - shit with indexing")
+        dist = self.batch_norm(
+            self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
+            - self.gripper_pos
+        )
+
         self.obs_buf = torch.cat(
             [
-                self.batch_norm(
-                    self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
-                    - self.gripper_pos
-                ).unsqueeze(
-                    dim=1
-                ),  # 1
+                dist.unsqueeze(dim=1),  # 1
                 self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
                 - self.object_pos,  # 3
                 self.object_pos,  # 3
@@ -447,8 +447,8 @@ class PandaSort:
             < self.env_cfg["termination_if_distance_less_than"],
             self.task_number == 2,
         )
-        error_task_number = self.task_number >= 3
-        if torch.sum(error_task_number) > 0:
+        error_task_number = self.task_number > 2
+        if torch.sum(error_task_number):
             logging.error("Some shit in code")
         self.reset_buf |= reached_the_target
         self.reset_buf |= error_task_number
@@ -457,43 +457,51 @@ class PandaSort:
         # Penalize changes in actions
         return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
 
-    def _reward_velocity_penalty(self):
-        pass
-
     def _reward_dist_to_target_obj(self):
         # count distance to reachable object
-        distance_to_task = self.batch_norm(
-            self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
-            - self.gripper_pos
-        )
-        charge_reward_envs = (
-            distance_to_task < self.env_cfg["termination_if_distance_less_than"]
-        )
-        total_reward = -distance_to_task + 2.0
-        total_reward *= self.task_number + 1
-        total_reward[charge_reward_envs] += 5.0
-        envs_for_grasping = torch.logical_and(charge_reward_envs, self.task_number == 1)
-        self.grasp_frames_counter[
-            torch.logical_or(envs_for_grasping, self.grasp_frames_counter > 0)
-        ] += 1
-        total_reward[
-            torch.logical_or(envs_for_grasping, self.grasp_frames_counter > 0)
-        ] += 2.0  # reward agent for achieving grasping step
-        stop_grasping_envs = self.grasp_frames_counter >= self.grasp_frame_cnt_limit
-        self.grasp_frames_counter[stop_grasping_envs] = 0
-        total_reward[
-            torch.logical_and(charge_reward_envs, self.task_number == 2)
-        ] += 15.0
-        self.task_number[charge_reward_envs] += 1
-        charging_reward = torch.sum(charge_reward_envs)
-        second_task_started = torch.sum(self.task_number == 1)
-        last_task_started = torch.sum(self.task_number == 2)
-        if second_task_started and charging_reward:
-            logging.info(f"Hovered over target: {second_task_started}")
-        if last_task_started and charging_reward:
-            logging.info(f"Grabbing object: {last_task_started}")
-        return total_reward
-
+        try:
+            distance_to_task = self.batch_norm(
+                self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
+                - self.gripper_pos
+            )
+            charge_reward_envs = (
+                distance_to_task < self.env_cfg["termination_if_distance_less_than"]
+            )
+            total_reward = -distance_to_task + 2.0
+            total_reward *= self.task_number + 1
+            total_reward[charge_reward_envs] += 5.0
+            envs_for_grasping = torch.logical_and(
+                charge_reward_envs, self.task_number == 1
+            )
+            self.grasp_frames_counter[
+                torch.logical_or(envs_for_grasping, self.grasp_frames_counter > 0)
+            ] += 1
+            total_reward[
+                torch.logical_or(envs_for_grasping, self.grasp_frames_counter > 0)
+            ] = 3.0  # reward agent for achieving grasping step
+            stop_grasping_envs = self.grasp_frames_counter >= self.grasp_frame_cnt_limit
+            self.grasp_frames_counter[stop_grasping_envs] = 0
+            total_reward[
+                torch.logical_and(charge_reward_envs, self.task_number == 2)
+            ] += 15.0
+            update_task_number = torch.logical_or(
+                torch.logical_and(
+                    charge_reward_envs, torch.logical_not(envs_for_grasping)
+                ),
+                stop_grasping_envs,
+            )
+            self.task_number[update_task_number] += 1
+            charging_reward = torch.sum(charge_reward_envs)
+            second_task_started = torch.sum(self.task_number == 1)
+            last_task_started = torch.sum(self.task_number == 2)
+            if second_task_started and charging_reward:
+                logging.info(f"Hovered over target: {second_task_started}")
+            if last_task_started and charging_reward:
+                logging.info(f"Grabbing object: {last_task_started}")
+            return total_reward
+        except Exception as e:
+            print(e)
+            raise e
         # change task number
 
     def close(self):

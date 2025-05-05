@@ -33,7 +33,11 @@ RUN apt-get install nvidia-kernel-common-535
 RUN apt-get install linux-modules-nvidia-535-6.8.0-58-generic linux-modules-nvidia-535-generic -y
 RUN apt-get install linux-headers-generic -y
 # RUN apt-get install -y nvidia-container-toolkit
-
+# install drivers
+# sudo apt-get install nvidia-driver-525 -y
+# sudo apt-get install nvidia-dkms-525 -y
+# sudo apt-get install nvidia-kernel-common-525 
+# sudo apt-get install linux-modules-nvidia-525-6.8.0-58-generic linux-modules-nvidia-525-generic -y
 
 COPY . .
 COPY ./rsl_rl .
