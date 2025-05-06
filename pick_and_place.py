@@ -228,7 +228,7 @@ class PandaSort:
                     (num_envs_to_reset, 1), device=self.device, dtype=gs.tc_float
                 )
                 * 0.1
-                + 0.3,  # x
+                + 0.4,  # x
                 torch.rand(
                     (num_envs_to_reset, 1), device=self.device, dtype=gs.tc_float
                 )
