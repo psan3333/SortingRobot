@@ -27,9 +27,11 @@ class PandaSort:
         render=False,
         device="cuda",
     ):
+
         logging.basicConfig(
             level=logging.INFO, filename=f"text_logs/logs.log", filemode="w"
         )
+        logging.info(f"Random seed: {torch.seed()}")
         self.device = torch.device(device)
         self.dt = 0.01  # сколько времени длится один кадр
         self.env_cfg = env_cfg
@@ -425,13 +427,9 @@ class PandaSort:
                 dist.unsqueeze(dim=1),  # 1
                 self.target_pos[self.all_envs_idx, self.task_number].squeeze(dim=1)
                 - self.gripper_pos,  # 3
-                self.gripper_pos - self.object_pos,  # 3
-                self.target_pos[self.all_envs_idx, 2].squeeze(dim=1)
-                - self.object_pos,  # 3
                 self.target_pos[self.all_envs_idx, self.task_number].squeeze(
                     dim=1
                 ),  # 3
-                self.object_pos,  # 3
                 self.gripper_pos,  # 3
                 self.dofs_pos,  # 5
                 self.dofs_vel,  # 5
