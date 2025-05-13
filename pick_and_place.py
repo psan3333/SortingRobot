@@ -450,6 +450,9 @@ class PandaSort:
             < self.env_cfg["termination_if_distance_less_than"],
             self.task_number == 2,
         )
+        reached_cnt = torch.sum(reached_the_target)
+        if reached_cnt:
+            logging.warning(f"The target was reached: {reached_cnt}")
         self.reset_buf |= reached_the_target
 
     def _reward_action_rate(self):
