@@ -93,7 +93,7 @@ def get_cfgs():
         "simulate_action_latency": True,
         "clip_actions": 100.0,
         "num_obs": 25,
-        "num_envs": 1,
+        "num_envs": 4,
         "reward_scales": {
             "dist_to_target_obj": 1.0,
             "high_velocity_penalty": -0.01,
