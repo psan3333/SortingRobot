@@ -1,0 +1,6 @@
+__pycache__
+venv
+logs
+panda_reach/logs
+trash_detector/runs
+data

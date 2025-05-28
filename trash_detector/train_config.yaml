@@ -1,0 +1,33 @@
+path: /home/sport_bot/diplom/detector/data
+train: images
+val: images
+
+names:
+  0: aluminium foil
+  1: battery
+  2: blister pack
+  3: bottle
+  4: bottle cap
+  5: broken glass
+  6: can
+  7: carton
+  8: cup
+  9: food waste
+  10: glass jar
+  11: lid
+  12: other plastic
+  13: paper
+  14: paper bag
+  15: plastic bag & wrapper
+  16: plastic container
+  17: plastic glooves
+  18: plastic utensils
+  19: pop tab
+  20: rope & strings
+  21: scrap metal
+  22: shoe
+  23: squeezable tube
+  24: straw
+  25: styrofoam piece
+  26: unlabeled litter
+  27: cigarette

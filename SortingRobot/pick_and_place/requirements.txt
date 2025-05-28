@@ -1,0 +1,10 @@
+genesis_world==0.2.1
+imageio==2.37.0
+matplotlib==3.10.1
+opencv_python==4.11.0.86
+scipy==1.15.2
+scikit-image
+torch==2.6.0
+torchvision
+torchaudio
+tensorboard
